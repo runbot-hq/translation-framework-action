@@ -434,6 +434,14 @@ async function run(): Promise<void> {
     const { keysTranslated, languagesCompleted, languagesFailed } = parseOutput(stdout)
 
     await core.group('Translation Output', async () => {
+      // WHY NO [translate] PREFIX INSIDE THE GROUP:
+      // The group label 'Translation Output' serves as the namespace for these
+      // lines — the prefix would be redundant noise inside a collapsed section.
+      // The [translate] prefix IS intentionally kept on the core.warning below
+      // because warnings fire outside the group into the flat step log stream,
+      // where they need the prefix to be identifiable alongside other [translate]
+      // lines (e.g. 'Running translate-cli...', 'Done.'). Do NOT add the prefix
+      // inside the group, and do NOT remove it from the warning.
       core.info(`Keys translated: ${keysTranslated}`)
       core.info(`Completed: ${languagesCompleted.join(', ') || '(none)'}`)
       if (languagesFailed.length > 0) {
@@ -441,6 +449,12 @@ async function run(): Promise<void> {
       }
     })
 
+    // WHY WARNING OUTSIDE THE GROUP (not inside):
+    // core.warning() produces a visible step annotation in the Actions UI header
+    // regardless of whether the group is expanded. Keeping it outside ensures
+    // failures are immediately visible without requiring the user to expand the
+    // group. The data is intentionally shown in both places: inside the group
+    // for discoverability, and as an annotation for immediate visibility.
     if (languagesFailed.length > 0) {
       core.warning(`[translate] Languages failed: ${languagesFailed.join(', ')}`)
     }
