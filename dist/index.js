@@ -26096,8 +26096,13 @@ async function run() {
             return;
         }
         const { keysTranslated, languagesCompleted, languagesFailed } = parseOutput(stdout);
-        core.info(`[translate] Keys translated: ${keysTranslated}`);
-        core.info(`[translate] Languages completed: ${languagesCompleted.join(', ') || '(none)'}`);
+        await core.group('Translation Output', async () => {
+            core.info(`Keys translated: ${keysTranslated}`);
+            core.info(`Completed: ${languagesCompleted.join(', ') || '(none)'}`);
+            if (languagesFailed.length > 0) {
+                core.info(`Failed: ${languagesFailed.join(', ')}`);
+            }
+        });
         if (languagesFailed.length > 0) {
             core.warning(`[translate] Languages failed: ${languagesFailed.join(', ')}`);
         }
