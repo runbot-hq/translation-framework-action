@@ -25643,7 +25643,7 @@ module.exports = {
 
 /***/ }),
 
-/***/ 9407:
+/***/ 5581:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -25682,14 +25682,144 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.translateCli = translateCli;
+exports.isFatalTranslateError = isFatalTranslateError;
 const core = __importStar(__nccwpck_require__(7484));
 const child_process_1 = __nccwpck_require__(5317);
-const path = __importStar(__nccwpck_require__(6928));
+/**
+ * Calls translate-cli-bin via spawnSync with an explicit argv array.
+ *
+ * WHY spawnSync NOT execSync:
+ * spawnSync passes args directly to the OS as an argv array — no shell
+ * metacharacter expansion. User-supplied values (language codes, file paths)
+ * cannot escape as shell injection via spaces, semicolons, backticks, $(), etc.
+ * Do NOT refactor to execSync with a shell string.
+ *
+ * WHY translate-cli-bin NOT translate-cli:
+ * The binary is named translate-cli-bin (not translate-cli) to avoid a POSIX
+ * name collision with the Swift source package directory of the same name if
+ * the repos are ever co-located. Callers must use translate-cli-bin. Do NOT
+ * rename it or add a symlink named translate-cli.
+ *
+ * WHY 300s TIMEOUT:
+ * 5 minutes per attempt. With one retry this means up to ~10 min wall time
+ * (5m attempt 1 + 10s delay + 5m attempt 2). Large repos with many locales
+ * and long .xcstrings files legitimately take several minutes. This is
+ * intentional — do NOT reduce the timeout without profiling against a large
+ * real-world .xcstrings file. A timeout surfaces as result.error (ETIMEDOUT),
+ * which is non-fatal and will be retried by the caller.
+ *
+ * WHY 10MB maxBuffer:
+ * translate-cli stdout is three key=value lines (≤30 bytes total). The 10 MB
+ * ceiling exists only to prevent a pathological binary crash from filling the
+ * Node.js buffer and OOMing the runner process. It will never be reached in
+ * normal operation.
+ */
+function translateCli(bin, args) {
+    if (core.isDebug()) {
+        core.debug(`[translate] spawnSync: ${bin} ${args.map(a => JSON.stringify(a)).join(' ')}`);
+    }
+    const result = (0, child_process_1.spawnSync)(bin, args, {
+        encoding: 'utf8',
+        timeout: 300_000,
+        maxBuffer: 10 * 1024 * 1024,
+    });
+    if (result.error)
+        throw result.error;
+    if (result.status !== 0) {
+        throw new Error(`translate-cli exited ${result.status}: ${result.stderr?.trim()}`);
+    }
+    return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+}
+/**
+ * Returns true if the error is fatal and a retry will not help.
+ *
+ * Fatal conditions (no point retrying):
+ * - Language pack not installed — user must download via System Settings
+ * - Unsupported language pair — Apple Translation does not support this pair at all
+ * - macOS version too old — runner needs upgrading, not retrying
+ * - Permission / MDM policy denied — infrastructure issue, not transient
+ *
+ * Non-fatal (retry may help): model cold-start, temporary framework crash, I/O blip.
+ *
+ * WHY SUBSTRING MATCHING NOT EXACT MATCHING:
+ * Apple's error messages are not versioned or guaranteed stable. We match on
+ * the most stable sub-phrase rather than the full string to avoid breaking on
+ * minor Apple framework wording changes. The match table is verified:
+ *   'translation framework requires macos 26+' → 'requires macos 26'  ✔
+ *   'language pack not installed for ...'      → 'language pack not installed'  ✔
+ *   'unsupported language pair: xx-YY'         → 'unsupported language pair'  ✔
+ *   permission/sandbox errors                  → 'eacces' / 'not authorized'  ✔
+ *
+ * COUPLING NOTE — two matches are owned by THIS codebase, not by Apple:
+ *   'unsupported language pair' → TranslationEngineError.unsupportedPair.description (TranslationEngine.swift)
+ *   'requires macos 26'         → TranslationEngineError.requiresmacOS26.description  (TranslationEngine.swift)
+ * If either Swift description string changes, the corresponding match here silently
+ * stops firing: the error will be retried instead of immediately failed. Always
+ * update both files together when changing these strings.
+ *
+ * macOS 26.0–26.3 caveat: LanguageAvailability preflight requires 26.4. On earlier
+ * versions, a missing language pack throws an opaque Apple error that may NOT match
+ * 'language pack not installed'. In that case this function returns false and the
+ * error is retried once — harmless but inefficient. If you observe spurious retries
+ * on 26.0–26.3 for missing packs, identify the opaque substring and add it here.
+ */
+function isFatalTranslateError(e) {
+    const msg = String(e).toLowerCase();
+    return (msg.includes('language pack not installed') ||
+        msg.includes('unsupported language pair') ||
+        msg.includes('requires macos 26') ||
+        msg.includes('eacces') ||
+        msg.includes('not authorized') ||
+        msg.includes('mdm policy'));
+}
+
+
+/***/ }),
+
+/***/ 1531:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.downloadTranslateCli = downloadTranslateCli;
+const core = __importStar(__nccwpck_require__(7484));
 const fs = __importStar(__nccwpck_require__(9896));
-const os = __importStar(__nccwpck_require__(857));
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const child_process_1 = __nccwpck_require__(5317);
 /**
  * Downloads translate-cli-bin from runbot-hq/translate-cli latest release into RUNNER_TEMP
  * using curl (universally available on macOS — no extra runner dependencies).
@@ -25812,135 +25942,56 @@ function downloadTranslateCli(dest) {
     fs.chmodSync(dest, 0o755);
     core.info(`[translate] Downloaded translate-cli-bin to ${dest}`);
 }
-/**
- * Calls translate-cli-bin via spawnSync with an explicit argv array.
- *
- * WHY spawnSync NOT execSync:
- * spawnSync passes args directly to the OS as an argv array — no shell
- * metacharacter expansion. User-supplied values (language codes, file paths)
- * cannot escape as shell injection via spaces, semicolons, backticks, $(), etc.
- * Do NOT refactor to execSync with a shell string.
- *
- * WHY translate-cli-bin NOT translate-cli:
- * The binary is named translate-cli-bin (not translate-cli) to avoid a POSIX
- * name collision with the Swift source package directory of the same name if
- * the repos are ever co-located. Callers must use translate-cli-bin. Do NOT
- * rename it or add a symlink named translate-cli.
- *
- * WHY 300s TIMEOUT:
- * 5 minutes per attempt. With one retry this means up to ~10 min wall time
- * (5m attempt 1 + 10s delay + 5m attempt 2). Large repos with many locales
- * and long .xcstrings files legitimately take several minutes. This is
- * intentional — do NOT reduce the timeout without profiling against a large
- * real-world .xcstrings file. A timeout surfaces as result.error (ETIMEDOUT),
- * which is non-fatal and will be retried by the caller.
- *
- * WHY 10MB maxBuffer:
- * translate-cli stdout is three key=value lines (≤30 bytes total). The 10 MB
- * ceiling exists only to prevent a pathological binary crash from filling the
- * Node.js buffer and OOMing the runner process. It will never be reached in
- * normal operation.
- */
-function translateCli(bin, args) {
-    if (core.isDebug()) {
-        core.debug(`[translate] spawnSync: ${bin} ${args.map(a => JSON.stringify(a)).join(' ')}`);
+
+
+/***/ }),
+
+/***/ 9407:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
     }
-    const result = (0, child_process_1.spawnSync)(bin, args, {
-        encoding: 'utf8',
-        timeout: 300_000,
-        maxBuffer: 10 * 1024 * 1024,
-    });
-    if (result.error)
-        throw result.error;
-    if (result.status !== 0) {
-        throw new Error(`translate-cli exited ${result.status}: ${result.stderr?.trim()}`);
-    }
-    return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
-}
-/**
- * Returns true if the error is fatal and a retry will not help.
- *
- * Fatal conditions (no point retrying):
- * - Language pack not installed — user must download via System Settings
- * - Unsupported language pair — Apple Translation does not support this pair at all
- * - macOS version too old — runner needs upgrading, not retrying
- * - Permission / MDM policy denied — infrastructure issue, not transient
- *
- * Non-fatal (retry may help): model cold-start, temporary framework crash, I/O blip.
- *
- * WHY SUBSTRING MATCHING NOT EXACT MATCHING:
- * Apple's error messages are not versioned or guaranteed stable. We match on
- * the most stable sub-phrase rather than the full string to avoid breaking on
- * minor Apple framework wording changes. The match table is verified:
- *   'translation framework requires macos 26+' → 'requires macos 26'  ✔
- *   'language pack not installed for ...'      → 'language pack not installed'  ✔
- *   'unsupported language pair: xx-YY'         → 'unsupported language pair'  ✔
- *   permission/sandbox errors                  → 'eacces' / 'not authorized'  ✔
- *
- * COUPLING NOTE — two matches are owned by THIS codebase, not by Apple:
- *   'unsupported language pair' → TranslationEngineError.unsupportedPair.description (TranslationEngine.swift)
- *   'requires macos 26'         → TranslationEngineError.requiresmacOS26.description  (TranslationEngine.swift)
- * If either Swift description string changes, the corresponding match here silently
- * stops firing: the error will be retried instead of immediately failed. Always
- * update both files together when changing these strings.
- *
- * macOS 26.0–26.3 caveat: LanguageAvailability preflight requires 26.4. On earlier
- * versions, a missing language pack throws an opaque Apple error that may NOT match
- * 'language pack not installed'. In that case this function returns false and the
- * error is retried once — harmless but inefficient. If you observe spurious retries
- * on 26.0–26.3 for missing packs, identify the opaque substring and add it here.
- */
-function isFatalTranslateError(e) {
-    const msg = String(e).toLowerCase();
-    return (msg.includes('language pack not installed') ||
-        msg.includes('unsupported language pair') ||
-        msg.includes('requires macos 26') ||
-        msg.includes('eacces') ||
-        msg.includes('not authorized') ||
-        msg.includes('mdm policy'));
-}
-/**
- * Parses translate-cli stdout for `key=value` output lines.
- *
- * translate-cli emits exactly three lines to stdout (and nothing else):
- *   keys_translated=42
- *   languages_completed=de,fr,ja
- *   languages_failed=zh-Hans
- *
- * WHY parseInt(val, 10) || 0:
- * Intentional NaN coercion, not a silent data-loss bug. parseInt returns NaN
- * only for fully non-numeric strings. parseInt("0", 10) returns 0 — `0 || 0`
- * is still 0, no false zero. translate-cli always emits a clean integer; the
- * || 0 guard exists only to prevent NaN propagating to setOutput/summary on a
- * hypothetical future malformed line. Do NOT replace with Number() — it is
- * less strict about leading-digit strings like "1abc".
- *
- * WHY rest.join('=') NOT rest[0]:
- * Handles the (unlikely) case where a value itself contains '=' characters.
- * Splitting on '=' and re-joining the tail is safer than assuming one '='.
- */
-function parseOutput(stdout) {
-    const lines = stdout.split('\n');
-    let keysTranslated = 0;
-    let languagesCompleted = [];
-    let languagesFailed = [];
-    for (const line of lines) {
-        const [key, ...rest] = line.split('=');
-        const val = rest.join('=').trim();
-        switch (key?.trim()) {
-            case 'keys_translated':
-                keysTranslated = parseInt(val, 10) || 0;
-                break;
-            case 'languages_completed':
-                languagesCompleted = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
-                break;
-            case 'languages_failed':
-                languagesFailed = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
-                break;
-        }
-    }
-    return { keysTranslated, languagesCompleted, languagesFailed };
-}
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const core = __importStar(__nccwpck_require__(7484));
+const path = __importStar(__nccwpck_require__(6928));
+const fs = __importStar(__nccwpck_require__(9896));
+const os = __importStar(__nccwpck_require__(857));
+const download_1 = __nccwpck_require__(1531);
+const cli_1 = __nccwpck_require__(5581);
+const output_1 = __nccwpck_require__(6202);
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -25962,7 +26013,7 @@ async function run() {
         // Do NOT add a uniqueness suffix: it would defeat this cache-skip optimisation.
         const downloaded = !fs.existsSync(translateBin);
         if (downloaded) {
-            downloadTranslateCli(translateBin);
+            (0, download_1.downloadTranslateCli)(translateBin);
         }
         else {
             core.info(`[translate] translate-cli-bin already present at ${translateBin}, skipping download`);
@@ -26064,19 +26115,19 @@ async function run() {
         // wrap this action in their own retry step.
         let stdout = '';
         try {
-            const r = translateCli(translateBin, args);
+            const r = (0, cli_1.translateCli)(translateBin, args);
             stdout = r.stdout;
             if (r.stderr)
                 core.debug(`[translate] stderr: ${r.stderr}`);
         }
         catch (e) {
             core.debug(`[translate] Attempt 1 error: ${String(e)}`);
-            if (isFatalTranslateError(e))
+            if ((0, cli_1.isFatalTranslateError)(e))
                 throw e; // do not retry fatal errors
             core.info('[translate] Attempt 1 failed — retrying in 10s...');
             await new Promise(r => setTimeout(r, 10_000));
             try {
-                const r = translateCli(translateBin, args);
+                const r = (0, cli_1.translateCli)(translateBin, args);
                 stdout = r.stdout;
                 if (r.stderr)
                     core.debug(`[translate] stderr: ${r.stderr}`);
@@ -26095,7 +26146,7 @@ async function run() {
             core.setFailed('[translate] translate-cli produced no stdout — binary may have crashed silently. Check runner logs for stderr output.');
             return;
         }
-        const { keysTranslated, languagesCompleted, languagesFailed } = parseOutput(stdout);
+        const { keysTranslated, languagesCompleted, languagesFailed } = (0, output_1.parseOutput)(stdout);
         await core.group('Translation Output', async () => {
             // WHY NO [translate] PREFIX INSIDE THE GROUP:
             // The group label 'Translation Output' serves as the namespace for these
@@ -26165,6 +26216,59 @@ async function run() {
     }
 }
 run();
+
+
+/***/ }),
+
+/***/ 6202:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseOutput = parseOutput;
+/**
+ * Parses translate-cli stdout for `key=value` output lines.
+ *
+ * translate-cli emits exactly three lines to stdout (and nothing else):
+ *   keys_translated=42
+ *   languages_completed=de,fr,ja
+ *   languages_failed=zh-Hans
+ *
+ * WHY parseInt(val, 10) || 0:
+ * Intentional NaN coercion, not a silent data-loss bug. parseInt returns NaN
+ * only for fully non-numeric strings. parseInt("0", 10) returns 0 — `0 || 0`
+ * is still 0, no false zero. translate-cli always emits a clean integer; the
+ * || 0 guard exists only to prevent NaN propagating to setOutput/summary on a
+ * hypothetical future malformed line. Do NOT replace with Number() — it is
+ * less strict about leading-digit strings like "1abc".
+ *
+ * WHY rest.join('=') NOT rest[0]:
+ * Handles the (unlikely) case where a value itself contains '=' characters.
+ * Splitting on '=' and re-joining the tail is safer than assuming one '='.
+ */
+function parseOutput(stdout) {
+    const lines = stdout.split('\n');
+    let keysTranslated = 0;
+    let languagesCompleted = [];
+    let languagesFailed = [];
+    for (const line of lines) {
+        const [key, ...rest] = line.split('=');
+        const val = rest.join('=').trim();
+        switch (key?.trim()) {
+            case 'keys_translated':
+                keysTranslated = parseInt(val, 10) || 0;
+                break;
+            case 'languages_completed':
+                languagesCompleted = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
+                break;
+            case 'languages_failed':
+                languagesFailed = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
+                break;
+        }
+    }
+    return { keysTranslated, languagesCompleted, languagesFailed };
+}
 
 
 /***/ }),
